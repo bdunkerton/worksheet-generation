@@ -64,7 +64,7 @@
           ctx.clearRect(0, 0, width, height);
 
           const svg = `<svg xmlns="http://www.w3.org/2000/svg"
-                  viewBox=" 0 0 ${width} ${height}"
+                  viewBox="0 0 ${width} ${height}"
                   preserveAspectRatio="none"
                   width="${width}"
                   height="${height}">
@@ -75,6 +75,8 @@
                       dominant-baseline="middle"
                       font-family="${fontFamilyName}"
                       font-size="${height * 0.85}"
+                      textLength="${width}"
+                      lengthAdjust="spacingAndGlyphs"
                       fill="#222"
                   >
                       ${name}
@@ -241,9 +243,55 @@
 
       async function loadAndSavePDF(arrayBuffer) {
         state.templatePdf = arrayBuffer;
-        const previewCanvas = await renderPdfPreview(arrayBuffer);
+        const previewCanvas = await renderPdfPreview(
+          state.templatePdf.slice(0),
+        );
         state.previewCanvas = previewCanvas;
         await render();
+      }
+
+      async function generateStamp() {
+        const { PDFDocument } = PDFLib;
+        const pdfDoc = await PDFDocument.create();
+
+        for (const name of state.names) {
+          const nameCanvas = document.createElement('canvas');
+          nameCanvas.width = state.box.width * state.pdfPageWidth;
+          nameCanvas.height = state.box.height * state.pdfPageHeight;
+
+          await renderNameToCanvas(nameCanvas, name, 'Arial');
+
+          const nameImageDataUrl = nameCanvas.toDataURL('image/png');
+          const nameImage = await pdfDoc.embedPng(nameImageDataUrl);
+
+          const templatePdfDoc = await PDFDocument.load(
+            new Uint8Array(state.templatePdf.slice(0)),
+          );
+          const [copiedPage] = await pdfDoc.copyPages(templatePdfDoc, [0]);
+          const page = pdfDoc.addPage(copiedPage);
+
+          const nameX = state.box.x * state.pdfPageWidth;
+          const nameY =
+            state.pdfPageHeight -
+            state.box.y * state.pdfPageHeight -
+            state.box.height * state.pdfPageHeight;
+
+          page.drawImage(nameImage, {
+            x: nameX,
+            y: nameY,
+            width: state.box.width * state.pdfPageWidth,
+            height: state.box.height * state.pdfPageHeight,
+          });
+        }
+
+        const pdfBytes = await pdfDoc.save();
+        const blob = new Blob([pdfBytes], { type: 'applicatoin/pdf' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'stamped-worksheets.pdf';
+        link.click();
+        URL.revokeObjectURL(url);
       }
 
       async function render() {
@@ -343,6 +391,20 @@
 
           app.appendChild(nameInput);
           app.appendChild(namesList);
+
+          if (state.names.length > 0 && state.templatePdf) {
+            const generateButton = el(
+              'button',
+              {
+                onClick: () => {
+                  generateStamp();
+                },
+                style: { marginTop: '1rem' },
+              },
+              'Generate Stamps',
+            );
+            app.appendChild(generateButton);
+          }
         }
       }
 
