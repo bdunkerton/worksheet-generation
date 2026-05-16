@@ -1,6 +1,10 @@
 # Stamp Machine
 
-A single-file HTML app that stamps student names onto preschool worksheets.
+### A single-file HTML app that stamps student names onto preschool worksheets.
+
+_100% vibe planned with Claude, and 99% hand coded by me! (with plenty of chat assist from Claude)_
+
+_Check out the [build guide](/stamp-machine-v2-build-guide.md) to see how we got here!_
 
 ## Why this exists
 
