@@ -341,8 +341,21 @@
             namesList.appendChild(
               el('strong', {}, `Names: (${state.names.length})`),
             );
-            state.names.forEach((name) => {
+            state.names.forEach((name, index) => {
+              const deleteButton = el(
+                'button',
+                {
+                  onClick: () => {
+                    state.names.splice(index, 1);
+                    localStorage.setItem('sm_names', JSON.stringify(state.names));
+                    updateList();
+                  },
+                  style: { marginLeft: '0.5rem' },
+                },
+                'Delete',
+              );
               namesList.appendChild(el('div', {}, name));
+              namesList.appendChild(deleteButton);
             });
           };
 
