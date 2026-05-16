@@ -1,0 +1,311 @@
+<!doctype html>
+<html>
+  <head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fontkit/1.8.1/fontkit.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <style>
+      :root {
+        --bg: #f5f5f0;
+        --ink: #000000;
+        --muted: #fffacd;
+        --line: #d3d3d3;
+        --accent: #a456e4;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      // == STATE ==
+      const state = {
+        box: null,
+        names: [],
+        templatePdf: null,
+        batchPdfs: [],
+        fontBytes: null,
+        phase: 'setup',
+        progress: null,
+        isDragging: false,
+        boxStartX: 0,
+        boxStartY: 0,
+      };
+
+      function el(tag, props, ...kids) {
+        const element = document.createElement(tag);
+        for (const [key, value] of Object.entries(props || {})) {
+          if (key === 'style') {
+            Object.assign(element.style, value);
+          } else if (key.startsWith('on')) {
+            element.addEventListener(key.slice(2).toLowerCase(), value);
+          } else if (key in element) {
+            element[key] = value;
+          } else {
+            element.setAttribute(key, value);
+          }
+        }
+        for (const kid of kids) {
+          if (typeof kid === 'string') {
+            element.textContent = kid;
+          } else {
+            element.appendChild(kid);
+          }
+        }
+        return element;
+      }
+
+      async function renderNameToCanvas(canvas, name, fontFamilyName) {
+        return new Promise((resolve) => {
+          const ctx = canvas.getContext('2d');
+          const { width, height } = canvas;
+
+          ctx.clearRect(0, 0, width, height);
+
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg"
+                  viewBox=" 0 0 ${width} ${height}"
+                  preserveAspectRatio="none"
+                  width="${width}"
+                  height="${height}">
+                  <text
+                      x="50%"
+                      y="50%"
+                      text-anchor="middle"
+                      dominant-baseline="middle"
+                      font-family="${fontFamilyName}"
+                      font-size="${height * 0.85}"
+                      fill="#222"
+                  >
+                      ${name}
+                  </text>
+              </svg>`;
+
+          const blob = new Blob([svg], { type: 'image/svg+xml' });
+          const url = URL.createObjectURL(blob);
+          const img = new Image();
+          img.onload = () => {
+            ctx.drawImage(img, 0, 0, width, height);
+            URL.revokeObjectURL(url);
+            resolve();
+          };
+          img.src = url;
+        });
+      }
+
+      function encodeBase64(arrayBuffer) {
+        const uint8Array = new Uint8Array(arrayBuffer);
+        let binaryString = '';
+        const chunkSize = 65536;
+
+        const chunks = Array.from(
+          { length: Math.ceil(uint8Array.length / chunkSize) },
+          (_, i) => uint8Array.subarray(i * chunkSize, (i + 1) * chunkSize),
+        );
+
+        binaryString = chunks
+          .map((chunk) => String.fromCharCode(...chunk))
+          .join('');
+
+        return btoa(binaryString);
+      }
+
+      function decodeBase64(base64String) {
+        const binaryString = atob(base64String);
+        return new Uint8Array(
+          [...binaryString].map((char) => char.charCodeAt(0)),
+        ).buffer;
+      }
+
+      async function loadAndSaveFont(arrayBuffer) {
+        const font = new FontFace('Arial', arrayBuffer);
+        await font.load();
+        document.fonts.add(font);
+
+        const base64Font = encodeBase64(arrayBuffer);
+        localStorage.setItem('sm_font', base64Font);
+
+        state.fontBytes = arrayBuffer;
+        await render();
+      }
+
+      function canvasPixelsToPdfPercent(canvasX, canvasY) {
+        const pdfPixelX = canvasX / state.previewScale;
+        const pdfPixelY = canvasY / state.previewScale;
+        return {
+          x: pdfPixelX / state.pdfPageWidth,
+          y: pdfPixelY / state.pdfPageHeight,
+        };
+      }
+
+      function getMouseCoordinatesAsPercentage(event) {
+        const rect = state.previewCanvas.getBoundingClientRect();
+        const canvasX = event.clientX - rect.left;
+        const canvasY = event.clientY - rect.top;
+        return canvasPixelsToPdfPercent(canvasX, canvasY);
+      }
+
+      async function redrawPreviewWithBox(startPercent, endPercent) {
+        const ctx = state.previewCanvas.getContext('2d');
+        ctx.drawImage(state.pdfImage, 0, 0);
+
+        const x1 = startPercent.x * state.pdfPageWidth * state.previewScale;
+        const y1 = startPercent.y * state.pdfPageHeight * state.previewScale;
+        const x2 = endPercent.x * state.pdfPageWidth * state.previewScale;
+        const y2 = endPercent.y * state.pdfPageHeight * state.previewScale;
+
+        ctx.fillStyle = 'rgba(164, 86, 228, 0.2)';
+        ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+      }
+
+      async function renderPdfPreview(arrayBuffer) {
+        const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer })
+          .promise;
+        const page = await pdfDoc.getPage(1);
+        const PREVIEW_SCALE = 1.5;
+        const viewport = page.getViewport({
+          scale: PREVIEW_SCALE,
+        });
+
+        state.previewScale = PREVIEW_SCALE;
+
+        const unsacaledViewport = page.getViewport({ scale: 1 });
+        state.pdfPageWidth = unsacaledViewport.width;
+        state.pdfPageHeight = unsacaledViewport.height;
+
+        const previewCanvas = document.createElement('canvas');
+        previewCanvas.width = viewport.width;
+        previewCanvas.height = viewport.height;
+        const ctx = previewCanvas.getContext('2d');
+
+        previewCanvas.addEventListener('mousedown', (event) => {
+          const rect = state.previewCanvas.getBoundingClientRect();
+          const canvasX = event.clientX - rect.left;
+          const canvasY = event.clientY - rect.top;
+
+          const startPercent = canvasPixelsToPdfPercent(canvasX, canvasY);
+          state.boxStartX = startPercent.x;
+          state.boxStartY = startPercent.y;
+          state.isDragging = true;
+        });
+
+        previewCanvas.addEventListener('mousemove', (event) => {
+          if (!state.isDragging) return;
+
+          const endPercent = getMouseCoordinatesAsPercentage(event);
+          redrawPreviewWithBox(
+            { x: state.boxStartX, y: state.boxStartY },
+            { x: endPercent.x, y: endPercent.y },
+          );
+        });
+
+        previewCanvas.addEventListener('mouseup', async (event) => {
+          if (!state.isDragging) return;
+          state.isDragging = false;
+          const endPercent = getMouseCoordinatesAsPercentage(event);
+
+          state.box = {
+            x: Math.min(state.boxStartX, endPercent.x),
+            y: Math.min(state.boxStartY, endPercent.y),
+            width: Math.abs(endPercent.x - state.boxStartX),
+            height: Math.abs(endPercent.y - state.boxStartY),
+          };
+
+          localStorage.setItem('sm_box', JSON.stringify(state.box));
+          redrawPreviewWithBox(
+            { x: state.boxStartX, y: state.boxStartY },
+            { x: endPercent.x, y: endPercent.y },
+          );
+
+          await render();
+
+        });
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        state.pdfImage = new Image();
+        state.pdfImage.src = previewCanvas.toDataURL();
+
+        return previewCanvas;
+      }
+
+      async function loadAndSavePDF(arrayBuffer) {
+        state.templatePdf = arrayBuffer;
+        const previewCanvas = await renderPdfPreview(arrayBuffer);
+        state.previewCanvas = previewCanvas;
+        await render();
+      }
+
+      async function render() {
+        const app = document.getElementById('app');
+
+        const fileInput = el('input', {
+          type: 'file',
+          accept: '.ttf,.pdf',
+          style: { display: 'none' },
+        });
+
+        fileInput.addEventListener('change', async (event) => {
+          const file = event.target.files[0];
+          const arrayBuffer = await file.arrayBuffer();
+          if (file.name.endsWith('.ttf')) {
+            await loadAndSaveFont(arrayBuffer);
+          } else if (file.name.endsWith('.pdf')) {
+            await loadAndSavePDF(arrayBuffer);
+          }
+        });
+
+        const uploadFileButton = el(
+          'button',
+          {
+            onClick: () => fileInput.click(),
+            style: { marginBottom: '1rem' },
+          },
+          'Upload File',
+        );
+
+        const uploadPdfTemplateButton = el(
+          'button',
+          {
+            onClick: () => fileInput.click(),
+            style: { marginBottom: '1rem' },
+          },
+          'Upload PDF Template',
+        );
+
+        app.innerHTML = '';
+        if (state.phase === 'setup') {
+          app.appendChild(
+            el(
+              'div',
+              { className: 'container' },
+              el('h1', {}, 'Stamp Machine'),
+              el('p', {}, 'Phase 3 Template PDF Preview + Box Drawing'),
+              el('pre', {}, JSON.stringify(state, null, 2)),
+            ),
+          );
+          if (!state.fontBytes) {
+            app.appendChild(uploadFileButton);
+          }
+          if (!state.templatePdf) {
+            app.appendChild(uploadPdfTemplateButton);
+          }
+          if (state.previewCanvas) {
+            app.appendChild(state.previewCanvas);
+          }
+        }
+      }
+
+      (async () => {
+        const savedBox = localStorage.getItem('sm_box');
+        const savedNames = localStorage.getItem('sm_names');
+        const savedFont = localStorage.getItem('sm_font');
+
+        if (savedBox) state.box = JSON.parse(savedBox);
+        if (savedNames) state.names = JSON.parse(savedNames);
+        if (savedFont) state.fontBytes = decodeBase64(savedFont);
+        await render();
+      })();
+    </script>
+  </body>
+</html>
