@@ -303,6 +303,46 @@
           if (state.previewCanvas) {
             app.appendChild(state.previewCanvas);
           }
+
+          const nameInput = el('input', {
+            type: 'text',
+            placeholder: 'Enter name for stamp',
+            style: { display: 'block', marginTop: '1rem' },
+          });
+
+          const namesList = el('div', {
+            style: {
+              marginTop: '1rem',
+              padding: '0.5rem',
+              border: '1px solid var(--line)',
+              maxHeight: '150px',
+              overflowY: 'auto',
+            },
+          });
+
+          const updateList = () => {
+            namesList.innerHTML = '';
+            namesList.appendChild(
+              el('strong', {}, `Names: (${state.names.length})`),
+            );
+            state.names.forEach((name) => {
+              namesList.appendChild(el('div', {}, name));
+            });
+          };
+
+          nameInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && nameInput.value.trim() !== '') {
+              state.names.push(nameInput.value.trim());
+              localStorage.setItem('sm_names', JSON.stringify(state.names));
+              nameInput.value = '';
+              updateList();
+            }
+          });
+
+          updateList();
+
+          app.appendChild(nameInput);
+          app.appendChild(namesList);
         }
       }
 
