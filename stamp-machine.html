@@ -61,7 +61,8 @@
           const ctx = canvas.getContext('2d');
           const { width, height } = canvas;
 
-          ctx.clearRect(0, 0, width, height);
+          ctx.fillStyle = 'white';
+          ctx.fillRect(0, 0, width, height);
 
           const svg = `<svg xmlns="http://www.w3.org/2000/svg"
                   viewBox="0 0 ${width} ${height}"
@@ -78,12 +79,12 @@
                   </defs>
                   <text
                       x="50%"
-                      y="50%"
+                      y="79%"
                       text-anchor="middle"
-                      dominant-baseline="middle"
+                      dominant-baseline="alphabetic"
                       font-family="StampFont"
-                      font-size="${height * 0.85}"
-                      textLength="${width}"
+                      font-size="${height * 0.8}"
+                      textLength="${width * 0.9}"
                       lengthAdjust="spacingAndGlyphs"
                       fill="#d3d3d3"
                   >
@@ -237,8 +238,10 @@
 
         for (const name of state.names) {
           const nameCanvas = document.createElement('canvas');
-          nameCanvas.width = state.box.width * state.pdfPageWidth;
-          nameCanvas.height = state.box.height * state.pdfPageHeight;
+          const SUPERSAMPLE = 3;
+          nameCanvas.width = state.box.width * state.pdfPageWidth * SUPERSAMPLE;
+          nameCanvas.height =
+            state.box.height * state.pdfPageHeight * SUPERSAMPLE;
 
           await renderNameToCanvas(nameCanvas, name);
 
