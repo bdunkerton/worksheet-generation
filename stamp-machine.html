@@ -218,12 +218,22 @@
           );
 
           await render();
-
         });
 
         await page.render({ canvasContext: ctx, viewport }).promise;
 
         state.pdfImage = new Image();
+        state.pdfImage.onload = () => {
+          if (state.box) {
+            redrawPreviewWithBox(
+              { x: state.box.x, y: state.box.y },
+              {
+                x: state.box.x + state.box.width,
+                y: state.box.y + state.box.height,
+              },
+            );
+          }
+        };
         state.pdfImage.src = previewCanvas.toDataURL();
 
         return previewCanvas;
