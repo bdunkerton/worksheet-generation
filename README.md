@@ -1,4 +1,5 @@
 # Stamp Machine
+https://github.com/user-attachments/assets/526f7bc6-dd6f-4781-a964-628a88630c86
 
 ### A single-file HTML app that stamps student names onto preschool worksheets.
 
